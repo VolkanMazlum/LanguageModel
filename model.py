@@ -27,13 +27,16 @@ class SimpleTransformer(tf.keras.Model):
         num_heads (int): Number of attention heads
         num_layers (int): Number of transformer blocks
     """
-    def __init__(self, vocab_size, d_model=64, num_heads=2, num_layers=2, **kwargs):
+    def __init__(self, vocab_size, d_model=64, num_heads=2, num_layers=2, rate=0.2, **kwargs):
         super().__init__(**kwargs)
         
         self.vocab_size = vocab_size
         self.d_model = d_model
         self.num_heads = num_heads
         self.num_layers = num_layers
+
+        self.rate = rate # NEW: Store dropout rate
+        self.dropout = tf.keras.layers.Dropout(rate)
         
         self.embedding = tf.keras.layers.Embedding(vocab_size, d_model)
         self.pos_encoding = self.positional_encoding(vocab_size, d_model)
@@ -69,18 +72,29 @@ class SimpleTransformer(tf.keras.Model):
         
         pos_encoding = angles[np.newaxis, ...]
         return tf.cast(pos_encoding, dtype=tf.float32)
+    def create_look_ahead_mask(self, size):
+        """
+        Creates a triangular matrix with ones on and below the main diagonal, 
+        and zeros above it. Used to prevent attention to subsequent tokens.
+        """
+        mask = 1 - tf.linalg.band_part(tf.ones((size, size)), -1, 0)
+        return mask  # (seq_len, seq_len)
     
     def call(self, x):
         seq_len = tf.shape(x)[1]
+
+        look_ahead_mask = self.create_look_ahead_mask(seq_len)
         
         # Embedding + Positional encoding
         x = self.embedding(x)
         x *= tf.math.sqrt(tf.cast(self.d_model, tf.float32))
         x += self.pos_encoding[:, :seq_len, :]
+
+        x = self.dropout(x, training=False)
         
         # Transformer blocks
         for transformer_block in self.transformer_blocks:
-            x = transformer_block(x)
+            x = transformer_block(x,mask=look_ahead_mask)
             
         # Final layer
         return self.final_layer(x)
@@ -113,6 +127,7 @@ class TransformerBlock(tf.keras.layers.Layer):
         super().__init__(**kwargs)
         self.d_model = d_model
         self.num_heads = num_heads
+        self.rate = 0.2 # NEW: Store dropout rate
         
         self.attention = tf.keras.layers.MultiHeadAttention(
             num_heads=num_heads, key_dim=d_model
@@ -121,6 +136,8 @@ class TransformerBlock(tf.keras.layers.Layer):
             tf.keras.layers.Dense(d_model * 2, activation='relu'),
             tf.keras.layers.Dense(d_model)
         ])
+        self.dropout1 = tf.keras.layers.Dropout(self.rate)
+        self.dropout2 = tf.keras.layers.Dropout(self.rate)
         
         self.layernorm1 = tf.keras.layers.LayerNormalization(epsilon=1e-6)
         self.layernorm2 = tf.keras.layers.LayerNormalization(epsilon=1e-6)
@@ -136,12 +153,15 @@ class TransformerBlock(tf.keras.layers.Layer):
     @classmethod
     def from_config(cls, config):
         return cls(**config)
+    
         
-    def call(self, x):
+    def call(self, x, mask=None):
         # Self-attention
-        attention_output = self.attention(x, x)
+        attention_output = self.attention(x, x, attention_mask=mask)
         x1 = self.layernorm1(x + attention_output)
+        attention_output = self.dropout1(attention_output, training=False)
         
         # Feed-forward network
         ffn_output = self.ffn(x1)
+        ffn_output = self.dropout2(ffn_output, training=False)
         return self.layernorm2(x1 + ffn_output) 
