@@ -417,12 +417,12 @@ def interactive_generation():
 1. **Model Architecture**
    - Add attention visualization
    - Implement different attention mechanisms
-   - Add dropout layers for better regularization
+   - Add dropout layers for better regularization xx
 
 2. **Training Process**
-   - Implement learning rate scheduling
-   - Add early stopping
-   - Implement cross-validation
+   - Implement learning rate scheduling xx
+   - Add early stopping xx
+   - Implement cross-validation xx
 
 3. **Text Generation**
    - Add diverse decoding strategies
